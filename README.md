@@ -26,6 +26,8 @@ cp .env.example .env
 php artisan key:generate
 # Edit .env: set DB credentials, APP_URL
 php artisan migrate
+# Run server
+php artisan serve
 ```
 
 ### 2. Register a client location
