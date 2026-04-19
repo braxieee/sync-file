@@ -1,21 +1,6 @@
 # File Sync — Server ↔ On-Premise Client
 
-A **pure Laravel** solution for pulling ~100MB files from on-premise clients that sit behind NAT/firewalls.
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Cloud Server (public IP)                 │
-│                                                             │
-│   POST /api/request-file ◄── Admin API / CLI                │
-│   GET  /api/pending ◄── Client polls this                   │
-│   POST /api/files/{download}/upload ◄── Client upload file  │
-└───────────────────────────────────┬─────────────────────────┘
-
-```
+A **Laravel** solution for pulling ~100MB files from on-premise clients that sit behind NAT/firewalls.
 
 ---
 
