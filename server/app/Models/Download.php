@@ -9,13 +9,17 @@ class Download extends Model
 {
     protected $fillable = [
         'client_id', 'status', 'file_path', 'file_size',
+        'files', 'files_total', 'files_uploaded',
         'requested_by', 'error_message', 'started_at', 'completed_at',
     ];
 
     protected $casts = [
-        'started_at' => 'datetime',
-        'completed_at' => 'datetime',
-        'file_size' => 'integer',
+        'started_at'     => 'datetime',
+        'completed_at'   => 'datetime',
+        'file_size'      => 'integer',
+        'files'          => 'array',
+        'files_total'    => 'integer',
+        'files_uploaded' => 'integer',
     ];
 
     const STATUS_PENDING = 'pending';
@@ -31,17 +35,36 @@ class Download extends Model
     public function isPending(): bool { return $this->status === self::STATUS_PENDING; }
     public function isCompleted(): bool { return $this->status === self::STATUS_COMPLETED; }
 
-    public function markUploading(): void
+    public function markUploading(int $totalFiles): void
     {
-        $this->update(['status' => self::STATUS_UPLOADING, 'started_at' => now()]);
+        $this->update([
+            'status' => self::STATUS_UPLOADING,
+            'files_total' => $totalFiles,
+            'started_at' => now(),
+        ]);
     }
 
-    public function markCompleted(string $filePath, int $fileSize): void
+    public function recordFileUploaded(string $originalName, string $storedPath, int $fileSize): void
+    {
+        $files = $this->files ?? [];
+        $files[] = [
+            'original_name' => $originalName,
+            'stored_path' => $storedPath,
+            'file_size' => $fileSize,
+            'uploaded_at' => now()->toIso8601String(),
+        ];
+
+        $this->update([
+            'files' => $files,
+            'files_uploaded' => count($files),
+            'file_size' => ($this->file_size ?? 0) + $fileSize,
+        ]);
+    }
+
+    public function markCompleted(): void
     {
         $this->update([
             'status' => self::STATUS_COMPLETED,
-            'file_path' => $filePath,
-            'file_size' => $fileSize,
             'completed_at' => now(),
         ]);
     }

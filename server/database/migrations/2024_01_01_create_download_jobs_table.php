@@ -21,6 +21,9 @@ return new class extends Migration
             $table->foreignId('client_id')->constrained()->cascadeOnDelete();
             $table->string('status')->default('pending');
             $table->string('file_path')->nullable();
+            $table->json('files')->nullable();
+            $table->unsignedInteger('files_total')->nullable();
+            $table->unsignedInteger('files_uploaded')->nullable();
             $table->unsignedBigInteger('file_size')->nullable();
             $table->string('requested_by')->nullable();
             $table->text('error_message')->nullable();

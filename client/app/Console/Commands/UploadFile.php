@@ -15,22 +15,22 @@ class UploadFile extends Command
 
     private string $serverUrl;
     private string $apiToken;
-    private string $filePath;
-    private int    $consecutiveErrors = 0;
+    private string $syncFolder;
+    private int $consecutiveErrors = 0;
 
     public function handle(): int
     {
         $this->serverUrl = rtrim(config('filesync.server_url'), '/');
         $this->apiToken = config('filesync.api_token');
-        $this->filePath = config('filesync.file_path');
+        $this->syncFolder = config('filesync.sync_folder');
 
         if (! $this->serverUrl || ! $this->apiToken) {
             $this->error('SERVER_URL and CLIENT_API_TOKEN must be set in .env');
             return self::FAILURE;
         }
 
-        if (! file_exists($this->filePath)) {
-            $this->error("File not found: {$this->filePath}");
+        if (! is_dir($this->syncFolder)) {
+            $this->error("Sync folder not found: {$this->syncFolder}");
             return self::FAILURE;
         }
 
@@ -38,7 +38,7 @@ class UploadFile extends Command
         $once = $this->option('once');
 
         $this->info("Client started. Server: {$this->serverUrl}");
-        $this->info("File: {$this->filePath} (" . $this->humanSize(filesize($this->filePath)) . ")");
+        $this->info("Sync folder : {$this->syncFolder}");
 
         do {
             try {
@@ -80,29 +80,70 @@ class UploadFile extends Command
         }
 
         $this->info("  → Download request #{$req['id']} found! Uploading...");
-        $this->uploadFile($req['id'], $req['upload_url']);
+        $this->uploadFolder($req['id'], $req['upload_url']);
     }
 
-    private function uploadFile(int $downloadId, string $uploadUrl): void
+    private function uploadFolder(int $downloadId, string $uploadUrl): void
     {
-        $fileSize = filesize($this->filePath);
-        $originalName = basename($this->filePath);
+        $files = collect(scandir($this->syncFolder))
+            ->filter(fn($f) => ! in_array($f, ['.', '..']) && is_file("{$this->syncFolder}/{$f}"))
+            ->values();
+
+        if ($files->isEmpty()) {
+            $this->warn("  No files found in {$this->syncFolder}. Reporting failure.");
+            $this->reportFailure($downloadId, 'No files found in sync folder.');
+            return;
+        }
+
+        $total = $files->count();
+        $this->info("  Found {$total} file(s) to upload:");
+        $files->each(fn($f) => $this->line("    - {$f} (" . $this->humanSize(filesize("{$this->syncFolder}/{$f}")) . ")"));
+
+        foreach ($files as $index => $filename) {
+            $filePath = "{$this->syncFolder}/{$filename}";
+            $current  = $index + 1;
+
+            $this->line("  [{$current}/{$total}] Uploading {$filename}...");
+
+            $success = $this->uploadSingleFile(
+                downloadId: $downloadId,
+                uploadUrl: $uploadUrl,
+                filePath: $filePath,
+                fileName: $filename,
+                totalFiles: $total,
+            );
+
+            if (! $success) {
+                $this->error("  Stopping upload batch due to error on {$filename}.");
+                return;
+            }
+        }
+
+        $this->info(" All {$total} file(s) uploaded for job #{$downloadId}.");
+    }
+
+    private function uploadSingleFile(
+        int    $downloadId,
+        string $uploadUrl,
+        string $filePath,
+        string $fileName,
+        int    $totalFiles,
+    ): bool {
+        $fileSize = filesize($filePath);
         $startTime = microtime(true);
-
-        $this->line("  Uploading {$originalName} " . $this->humanSize($fileSize) . " to server...");
-
-        $stream = fopen($this->filePath, 'rb');
+        $stream = fopen($filePath, 'rb');
 
         if (! $stream) {
-            $this->reportFailure($downloadId, "Cannot open file: {$this->filePath}");
-            return;
+            $this->reportFailure($downloadId, "Cannot open: {$filePath}");
+            return false;
         }
 
         try {
             $response = Http::withToken($this->apiToken)
                 ->timeout(600)
                 ->withHeaders([
-                    'X-File-Name' => $originalName,
+                    'X-File-Name'   => $fileName,
+                    'X-Files-Total' => $totalFiles,
                 ])
                 ->withBody(
                     \GuzzleHttp\Psr7\Utils::streamFor($stream),
@@ -114,15 +155,19 @@ class UploadFile extends Command
 
             if ($response->successful()) {
                 $elapsed = round(microtime(true) - $startTime, 1);
-                $speed   = $this->humanSize((int)($fileSize / max($elapsed, 1))) . '/s';
-                $this->info("  ✓ Done in {$elapsed}s ({$speed})");
-            } else {
-                $this->error("  ✗ Upload failed: HTTP " . $response->status());
-                $this->error("  " . $response->body());
+                $speed = $this->humanSize((int)($fileSize / max($elapsed, 1))) . '/s';
+                $this->info(" {$fileName} done in {$elapsed}s ({$speed})");
+                return true;
             }
+
+            $this->error(" Failed: HTTP " . $response->status() . ' — ' . $response->body());
+            return false;
+
         } catch (\Throwable $e) {
             if (is_resource($stream)) fclose($stream);
+            $this->error(" Exception: " . $e->getMessage());
             $this->reportFailure($downloadId, $e->getMessage());
+            return false;
         }
     }
 

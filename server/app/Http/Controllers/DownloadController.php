@@ -52,8 +52,6 @@ class DownloadController extends Controller
             return response()->json(['job' => null]);
         }
 
-        $download->markUploading();
-
         return response()->json([
             'download' => [
                 'id' => $download->id,

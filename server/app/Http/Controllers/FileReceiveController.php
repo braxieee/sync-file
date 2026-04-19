@@ -23,12 +23,15 @@ class FileReceiveController extends Controller
             return response()->json(['message' => "Download is already {$download->status}."], 409);
         }
 
+        if ($download->status === Download::STATUS_PENDING) {
+            $totalFiles = (int) $request->header('X-Files-Total', 1);
+            $download->markUploading($totalFiles);
+        }
+
         try {
-            $originalName = $request->header('X-File-Name');
-            $filename = $originalName 
-                ? pathinfo($originalName, PATHINFO_FILENAME) . "_download-{$download->id}" . '.' . pathinfo($originalName, PATHINFO_EXTENSION) 
-                : "job-{$download->id}_" . now()->format('Ymd_His');
-            $dir = storage_path("app/downloads/client-{$client->id}");
+            $originalName = $request->header('X-File-Name', 'file_' . now()->format('Ymd_His'));
+            $filename = $this->safeName($originalName, $download->id);
+            $dir = storage_path("app/downloads/client-{$client->id}/download-{$download->id}");
 
             if (! is_dir($dir)) {
                 mkdir($dir, 0755, true);
@@ -50,22 +53,38 @@ class FileReceiveController extends Controller
                 throw new \RuntimeException('Empty or unreadable upload stream.');
             }
 
-            $relativePath = "downloads/client-{$client->id}/{$filename}";
-            $download->markCompleted($relativePath, $size);
-            $download->load('client');
-            $this->webhook->downloadCompleted($download);
+            $relativePath = "downloads/client-{$client->id}/download-{$download->id}/{$filename}";
+            $download->recordFileUploaded($originalName, $relativePath, $size);
+            $download->refresh();
+
+            $allDone = $download->files_total > 0 && $download->files_uploaded >= $download->files_total;
+
+            if ($allDone) {
+                $download->markCompleted();
+                $download->load('client');
+                $this->webhook->downloadCompleted($download);
+            }
 
             return response()->json([
-                'message' => 'File received successfully.',
-                'download_id' => $download->id,
+                'message' => $allDone ? 'All files received.' : 'File received.',
+                'job_id' => $download->id,
+                'file_name' => $filename,
                 'file_size' => $size,
-                'stored_at' => $relativePath,
-            ]);
+                'files_uploaded' => $download->files_uploaded,
+                'files_total' => $download->files_total,
+                'job_complete' => $allDone,
+            ]); 
         } catch (\Throwable $e) {
             $download->markFailed($e->getMessage());
             $download->load('client');
             $this->webhook->downloadFailed($download);
             return response()->json(['message' => 'Upload failed: ' . $e->getMessage()], 500);
         }
+    }
+
+    private function safeName(string $originalName, int $downloadId): string
+    {
+        $name = preg_replace('/[^a-zA-Z0-9.\-_]/', '_', basename($originalName));
+        return $name;
     }
 }
