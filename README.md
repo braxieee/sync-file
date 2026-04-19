@@ -26,8 +26,6 @@ cp .env.example .env
 php artisan key:generate
 # Edit .env: set DB credentials, APP_URL
 php artisan migrate
-# Run server
-php artisan serve
 ```
 
 ### 2. Register a client location
@@ -48,6 +46,11 @@ php artisan file:request-download {client_id} --wait
 
 # Custom timeout (seconds)
 php artisan file:request-download {client_id} --wait --timeout=600
+```
+
+### 4. Run server via artisan serve
+```bash
+php artisan serve
 ```
 
 **Via API:**
